@@ -1,0 +1,2199 @@
+#database connector script
+import csv
+import time
+import numbers
+from random import seed
+from random import randint
+from os.path import exists
+import wx
+import threading
+import wx.dataview as dv
+
+oldDataStorageName = []
+oldDataStorage = []
+
+databaseName = []
+databaseData = []
+databaseTriggers = []
+#column names for database
+databaseHeaders = []
+#current operations saved
+databaseOperationData = []
+databaseUpdateTriggers = [["none", "none", "none", "none"]]
+databaseOptionData = []
+
+testChoices = ['Source DB', 'Blank DB', 'Blank DB2', 'Create New Trigger Data', 'Add 10 Triggered Rows']
+
+consoleText = ""
+triggerDBName = ""
+optionDBName = ""
+operationDBName = ""
+sourceDatabase = "none"
+showAllTriggers = False
+
+#syncing vars
+syncRawData = []
+syncDatabaseName = []
+syncDatabaseData = []
+addTrigDataCounter = 11
+currentSyncTime = 10
+
+class UserInterface(wx.Frame):
+
+    def __init__(self, parent, title):
+        super(UserInterface, self).__init__(parent, title=title,
+            size=(1200, 800))
+        panel = wx.Panel(self)
+        vbox = wx.BoxSizer(wx.VERTICAL)
+
+        self.Centre()
+
+        #test select button
+        button2 = wx.Button(panel, wx.ID_ANY, 'Execute', pos=(200, 50))
+        button2.Bind(wx.EVT_BUTTON, onButtonSelect)
+        # execute add trigger
+        button4 = wx.Button(panel, wx.ID_ANY, 'Add', pos=(715, 590))
+        button4.Bind(wx.EVT_BUTTON, onButtonPull2)
+        # save trigger data
+        button5 = wx.Button(panel, wx.ID_ANY, 'Save Cutoff Data', pos=(550, 630))
+        button5.Bind(wx.EVT_BUTTON, onButtonPull3)
+        #execute save source database
+        #button6 = wx.Button(panel, wx.ID_ANY, 'Execute', pos=(130, 278))
+        #button6.Bind(wx.EVT_BUTTON, onButtonPull4)
+
+            # sync databases
+        button10 = wx.Button(panel, wx.ID_ANY, 'Single Sync', pos=(1090, 260))
+        button10.Bind(wx.EVT_BUTTON, onButtonPull20)
+        button11 = wx.Button(panel, wx.ID_ANY, 'Sync for time', pos=(800, 260))
+        button11.Bind(wx.EVT_BUTTON, onButtonPull21)
+        button12 = wx.Button(panel, wx.ID_ANY, 'View current sync time', pos=(800, 295))
+        button12.Bind(wx.EVT_BUTTON, onButtonPull22)
+
+        #change sync time
+        button13 = wx.Button(panel, wx.ID_ANY, 'Change', pos=(915, 349))
+        button13.Bind(wx.EVT_BUTTON, onButtonPull23)
+
+        # execute add operation
+        button9 = wx.Button(panel, wx.ID_ANY, 'Add', pos=(665, 300))
+        button9.Bind(wx.EVT_BUTTON, onButtonPull8)
+        # option execute
+        button8 = wx.Button(panel, wx.ID_ANY, 'Save Operation Data', pos=(450, 340))
+        button8.Bind(wx.EVT_BUTTON, onButtonPull9)
+
+        #console window
+        self.textpanel1 = wx.TextCtrl(panel,
+                                     style=wx.TE_MULTILINE | wx.TE_READONLY, size=(350,250), pos=(820,500))
+
+        #selector
+        self.testSelector = wx.ComboBox(panel, pos=(10, 50), choices=testChoices,
+                         style=wx.CB_READONLY)
+
+        self.textDisp = wx.TextCtrl(panel, style=wx.TE_MULTILINE, pos=(900, 50), size=(270,200))
+
+        dbs = ['Clear']
+        self.lst = wx.ListBox(panel, size=(100, 200), pos=(800, 50), choices=dbs, style=wx.LB_SINGLE)
+        self.lst.Bind(wx.EVT_LISTBOX, onListBox, self.lst)
+
+        #trigger stuff
+        dbs = ['Clear']
+        self.lst2 = wx.ListBox(panel, size=(100, 200), pos=(10, 550), choices=dbs, style=wx.LB_SINGLE)
+        self.lst2.Bind(wx.EVT_LISTBOX, onListBox2, self.lst2)
+
+        dbsV = []
+
+        self.lst3 = wx.ListBox(panel, size=(150, 200), pos=(110, 550), choices=dbsV, style=wx.LB_SINGLE)
+        self.lst3.Bind(wx.EVT_LISTBOX, onListBox3, self.lst3)
+
+        self.lst4 = wx.ListBox(panel, size=(120, 200), pos=(260, 550), choices=dbsV, style=wx.LB_SINGLE)
+        self.lst4.Bind(wx.EVT_LISTBOX, onListBox4, self.lst4)
+
+        self.lst5 = wx.ListBox(panel, size=(150, 200), pos=(380, 550), choices=dbsV, style=wx.LB_SINGLE)
+        self.lst5.Bind(wx.EVT_LISTBOX, onListBox5, self.lst5)
+
+        #configure operations
+        self.lst6 = wx.ListBox(panel, size=(100, 200), pos=(10, 260), choices=dbsV, style=wx.LB_SINGLE)
+        self.lst6.Bind(wx.EVT_LISTBOX, onListBox6, self.lst6)
+
+        self.lst7 = wx.ListBox(panel, size=(100, 200), pos=(110, 260), choices=dbsV, style=wx.LB_SINGLE)
+        self.lst7.Bind(wx.EVT_LISTBOX, onListBox7, self.lst7)
+
+        self.lst8 = wx.ListBox(panel, size=(220, 200), pos=(210, 260), choices=dbsV, style=wx.LB_SINGLE)
+        self.lst8.Bind(wx.EVT_LISTBOX, onListBox8, self.lst8)
+
+
+        #self.Bind(wx.EVT_LISTBOX, self.onListBox, self.lst)
+        #static textboxs
+        font = wx.Font(15, wx.DEFAULT, wx.NORMAL, wx.NORMAL)
+        self.st1 = wx.StaticText(panel, label='Run Test', pos=(10, 10))
+        self.st1.SetFont(font)
+        self.st2 = wx.StaticText(panel, label='View Databases', pos=(925, 15))
+        self.st2.SetFont(font)
+        self.st6 = wx.StaticText(panel, label='Configure Cutoffs', pos=(10, 490))
+        self.st6.SetFont(font)
+        self.st6 = wx.StaticText(panel, label='Database Name', pos=(10, 530))
+        self.st7 = wx.StaticText(panel, label='Console', pos=(965, 475))
+        self.st7.SetFont(font)
+        self.st8 = wx.StaticText(panel, label='Cutoff', pos=(110, 530))
+        self.st9 = wx.StaticText(panel, label='Update Options', pos=(260, 530))
+        self.st10 = wx.StaticText(panel, label='Current Cutoffs', pos=(380, 515))
+        self.st11 = wx.StaticText(panel, label='(Click to remove)', pos=(380, 530))
+        self.st11 = wx.StaticText(panel, label='Add Cutoff', pos=(550, 550))
+        self.st11 = wx.StaticText(panel, label='Symbols: >,<,>=,<=,=', pos=(550, 570))
+        #self.st13 = wx.StaticText(panel, label='Database Name', pos=(10, 260))
+        self.st14 = wx.StaticText(panel, label='Configure Operations', pos=(10, 200))
+        self.st14.SetFont(font)
+        self.st15 = wx.StaticText(panel, label='Database Name', pos=(10, 240))
+        self.st16 = wx.StaticText(panel, label='Headers', pos=(110, 240))
+        self.st17 = wx.StaticText(panel, label='Current Operations', pos=(210, 225))
+        self.st17 = wx.StaticText(panel, label='(Click to remove)', pos=(210, 240))
+
+        self.st18 = wx.StaticText(panel, label='Add Operation', pos=(450, 260))
+        self.st19 = wx.StaticText(panel, label='Symbols: * , / , + , -', pos=(450, 280))
+        self.st20 = wx.StaticText(panel, label='Change sync time', pos=(800, 330))
+        #radio buttons
+        #self.rb1 = wx.RadioButton(panel, 22, label='CSV', pos=(110, 152))
+
+        #databse text input
+        #self.t1 = wx.TextCtrl(panel, pos=(10, 150), size=(90,20))
+        #self.t2 = wx.TextCtrl(panel, pos=(160, 150), size=(40, 20))
+        #text input
+        self.t3 = wx.TextCtrl(panel, pos=(550, 592), size=(150, 20))
+        self.t4 = wx.TextCtrl(panel, pos=(450, 302), size=(200, 20))
+        self.t5 = wx.TextCtrl(panel, pos=(800, 350), size=(100, 20))
+
+
+#change sync time
+def onButtonPull23(event):
+    global currentSyncTime
+    newTime = ex.t5.GetValue()
+    try:
+        newTime2 = int(newTime)
+        currentSyncTime = newTime2
+        toConsole("[INFO] Sync time changed to " + str(currentSyncTime) + " seconds")
+    except:
+        toConsole("[ERROR] New time selected is not an integer")
+
+#view current sync time
+def onButtonPull22(event):
+    toConsole("[INFO] Current sync time (in seconds): " + str(currentSyncTime))
+
+#single sync
+def onButtonPull20(event):
+    if sourceDatabase == "":
+        toConsole("[ERROR] Source database not set")
+        return
+    if exists("newTriggerData.csv"):
+        inData = readCSV("newTriggerData")
+
+        firstRun = True
+        columnNames = []
+        gottenData = []
+        gottenData3 = []
+        oldData = []
+        for x in inData:
+            if firstRun:
+                firstRun = False
+                for y in x:
+                    columnNames.append(y.lower())
+            else:
+                gottenData3.append(x)
+
+        #check for duplicates
+        gottenData2 = []
+        dups = 0
+        for g1 in range(0,len(databaseName)):
+            if databaseName[g1] == sourceDatabase:
+                for x1 in gottenData3:
+                    sameT = False
+                    for x2 in databaseData[g1]:
+                        if x1 == x2:
+                            sameT = True
+                            break
+                    if not sameT:
+                        gottenData2.append(x1)
+        gottenData = gottenData2
+        if dups != 0:
+            toConsole("[WARNING] Found " + str(dups) + " duplicate rows, not adding these")
+
+        if len(gottenData) == 0:
+            toConsole("[INFO] Did not obtain any trigger data")
+        else:
+            indexNum = 0
+            for a in databaseName:
+                if a == sourceDatabase:
+                    break
+                else:
+                    indexNum+=1
+            toConsole("[INFO] Found " + str(len(gottenData)) + " triggered rows")
+            oldData = databaseData[indexNum]
+            databaseData[indexNum].extend(gottenData)
+            databaseIndex = 0
+
+            for g in databaseName:
+                if g != sourceDatabase:
+                    numModified = 0
+                    tempHeaders = []
+                    for a in databaseHeaders:
+                        if a[0] == g:
+                            for y in range(1, len(a)):
+                                if a[y] != "":
+                                    tempHeaders.append(a[y].lower())
+
+                    tempNewRows = []
+                    #check for operations
+                    for m in gottenData:
+                        tempPush = []
+                        for f in tempHeaders:
+                            tempPush.append("")
+                        for n in range(0, len(m)):
+                            haveOperation = False
+                            #check if we don't have operation for current element
+                            for opData in databaseOperationData:
+                                if opData[0] == g:
+                                    for p in range(1,len(opData)):
+                                        if columnNames[n] == opData[p][0]:
+                                            haveOperation = True
+                                            break
+                                    break
+                            if not haveOperation:
+                                tempCount = 0
+                                for t in tempHeaders:
+                                    if t == columnNames[n]:
+                                        tempPush[tempCount] = m[n]
+                                        break
+                                    tempCount += 1
+                            else:
+                                for opData in databaseOperationData:
+                                    if opData[0] == g:
+                                        for p in range(1, len(opData)):
+                                            foundName = False
+                                            if columnNames[n] == opData[p][0]:
+                                                foundName = True
+                                                for t in range(0, len(tempHeaders)):
+                                                    if opData[p][0] == "":
+                                                        break
+                                                    if tempHeaders[t] == opData[p][0]:
+                                                        #get value 1
+                                                        value1 = ""
+                                                        for r in range(0, len(columnNames)):
+                                                            if columnNames[r] == opData[p][1]:
+                                                               value1 = m[r]
+                                                        # get value 1
+                                                        value2 = ""
+                                                        for r in range(0, len(columnNames)):
+                                                            if columnNames[r] == opData[p][3]:
+                                                                value2 = m[r]
+                                                        value3 = ""
+                                                        if value1 == "":
+                                                            value1 = str(opData[p][1])
+                                                        if value2 == "":
+                                                            value2 = str(opData[p][3])
+                                                        if opData[p][2] == "+":
+                                                            value3 = str(float(value1) + float(value2))
+                                                        elif opData[p][2] == "-":
+                                                            value3 = str(float(value1) - float(value2))
+                                                        elif opData[p][2] == "/":
+                                                            value3 = str(round(float(value1) / float(value2),5))
+                                                        elif opData[p][2] == "*":
+                                                            value3 = str(round(float(value1) * float(value2),5))
+                                                        tempPush[t] = value3
+                                                        numModified += 1
+                                            if not foundName:
+                                                for b1 in range(0,len(tempHeaders)):
+                                                    if tempHeaders[b1] == opData[p][0]:
+                                                        #get value1
+                                                        value1 = ""
+                                                        for r in range(0, len(columnNames)):
+                                                            if columnNames[r] == opData[p][1]:
+                                                                value1 = m[r]
+                                                        # get value 1
+                                                        value2 = ""
+                                                        for r in range(0, len(columnNames)):
+                                                            if columnNames[r] == opData[p][3]:
+                                                                value2 = m[r]
+                                                        value3 = ""
+                                                        if value1 == "":
+                                                            value1 = str(opData[p][1])
+                                                        if value2 == "":
+                                                            value2 = str(opData[p][3])
+                                                        if opData[p][2] == "+":
+                                                            value3 = str(float(value1) + float(value2))
+                                                        elif opData[p][2] == "-":
+                                                            value3 = str(float(value1) - float(value2))
+                                                        elif opData[p][2] == "/":
+                                                            value3 = str(round(float(value1) / float(value2), 5))
+                                                        elif opData[p][2] == "*":
+                                                            value3 = str(round(float(value1) * float(value2), 5))
+                                                        tempPush[b1] = value3
+                                                        numModified +=1
+                        tempNewRows.append(tempPush)
+
+                    toConsole("[INFO] Found " + str(numModified) + " modified elements for database " + str(g))
+                    ### check cutoffs begin ###
+                    newElement = 0
+                    updatedElement = 0
+                    deletedElement = 0
+                    removedCount = 0
+                    for b1 in databaseTriggers:
+                        if b1[0] == g:
+                            newElement = int(b1[1])
+                            updatedElement = int(b1[2])
+                            deletedElement = int(b1[3])
+                    if updatedElement == 1:
+                        for c1 in range(0, len(databaseUpdateTriggers)):
+                            if databaseUpdateTriggers[c1][0] == g:
+                                for c2 in range(0, len(tempHeaders)):
+                                    if tempHeaders[c2].lower() == databaseUpdateTriggers[c1][1].lower():
+                                        d=0
+                                        while d < len(tempNewRows):
+                                            if databaseUpdateTriggers[c1][2] == ">":
+                                                if float(tempNewRows[d][c2]) <= float(databaseUpdateTriggers[c1][3]):
+                                                    tempNewRows.pop(d)
+                                                    d-=1
+                                                    removedCount+=1
+                                            elif databaseUpdateTriggers[c1][2] == "<":
+                                                if float(tempNewRows[d][c2]) >= float(databaseUpdateTriggers[c1][3]):
+                                                    tempNewRows.pop(d)
+                                                    d-=1
+                                                    removedCount += 1
+                                            elif databaseUpdateTriggers[c1][2] == ">=":
+                                                if float(tempNewRows[d][c2]) < float(databaseUpdateTriggers[c1][3]):
+                                                    tempNewRows.pop(d)
+                                                    d-=1
+                                                    removedCount += 1
+                                            elif databaseUpdateTriggers[c1][2] == "<=":
+                                                if float(tempNewRows[d][c2]) > float(databaseUpdateTriggers[c1][3]):
+                                                    tempNewRows.pop(d)
+                                                    d-=1
+                                                    removedCount += 1
+                                            elif databaseUpdateTriggers[c1][2] == "=":
+                                                if float(tempNewRows[d][c2]) != float(databaseUpdateTriggers[c1][3]):
+                                                    tempNewRows.pop(d)
+                                                    d-=1
+                                                    removedCount += 1
+                                            d+=1
+                    else:
+                        toConsole("[INFO] Cutoffs toggled OFF for database " + g)
+                    toConsole("[INFO] Not adding " + str(removedCount) + " rows for database " + g + " because of cutoffs")
+                    toConsole("[INFO] Adding " + str(len(tempNewRows)) + " rows to database " + g)
+                    ### end of check cutoff ###
+
+                    for t1 in range(0, len(databaseName)):
+                        if databaseName[t1] == g:
+                            databaseData[t1].extend(tempNewRows)
+
+                databaseIndex+=1
+
+
+
+
+    else:
+        toConsole("[INFO] No triggered data found")
+        return
+
+
+#sync for time
+def onButtonPull21(event):
+    if sourceDatabase == "":
+        toConsole("[ERROR] Source database not set")
+        return
+    timeCount = 0
+    toConsole("[INFO] Started syncing for " + str(currentSyncTime) + " seconds")
+    while timeCount < currentSyncTime:
+        timeCount+=1
+        time.sleep(1)
+        ### start ###
+        if sourceDatabase == "":
+            toConsole("[ERROR] Source database not set")
+            return
+        if exists("newTriggerData.csv"):
+            inData = readCSV("newTriggerData")
+
+            firstRun = True
+            columnNames = []
+            gottenData = []
+            gottenData3 = []
+            oldData = []
+            for x in inData:
+                if firstRun:
+                    firstRun = False
+                    for y in x:
+                        columnNames.append(y.lower())
+                else:
+                    gottenData3.append(x)
+
+            # check for duplicates
+            gottenData2 = []
+            dups = 0
+            for g1 in range(0, len(databaseName)):
+                if databaseName[g1] == sourceDatabase:
+                    for x1 in gottenData3:
+                        sameT = False
+                        for x2 in databaseData[g1]:
+                            if x1 == x2:
+                                sameT = True
+                                break
+                        if not sameT:
+                            gottenData2.append(x1)
+            gottenData = gottenData2
+
+            if len(gottenData) == 0:
+                print("Sync time: " + str(timeCount))
+                #toConsole("[INFO] Did not obtain any trigger data")
+            else:
+                indexNum = 0
+                for a in databaseName:
+                    if a == sourceDatabase:
+                        break
+                    else:
+                        indexNum += 1
+                toConsole("[INFO] Found " + str(len(gottenData)) + " triggered rows")
+                oldData = databaseData[indexNum]
+                databaseData[indexNum].extend(gottenData)
+                databaseIndex = 0
+
+                for g in databaseName:
+                    if g != sourceDatabase:
+                        numModified = 0
+                        tempHeaders = []
+                        for a in databaseHeaders:
+                            if a[0] == g:
+                                for y in range(1, len(a)):
+                                    if a[y] != "":
+                                        tempHeaders.append(a[y].lower())
+
+                        tempNewRows = []
+                        # check for operations
+                        for m in gottenData:
+                            tempPush = []
+                            for f in tempHeaders:
+                                tempPush.append("")
+                            for n in range(0, len(m)):
+                                haveOperation = False
+                                # check if we don't have operation for current element
+                                for opData in databaseOperationData:
+                                    if opData[0] == g:
+                                        for p in range(1, len(opData)):
+                                            if columnNames[n] == opData[p][0]:
+                                                haveOperation = True
+                                                break
+                                        break
+                                if not haveOperation:
+                                    tempCount = 0
+                                    for t in tempHeaders:
+                                        if t == columnNames[n]:
+                                            tempPush[tempCount] = m[n]
+                                            break
+                                        tempCount += 1
+                                else:
+                                    for opData in databaseOperationData:
+                                        if opData[0] == g:
+                                            for p in range(1, len(opData)):
+                                                foundName = False
+                                                if columnNames[n] == opData[p][0]:
+                                                    foundName = True
+                                                    for t in range(0, len(tempHeaders)):
+                                                        if opData[p][0] == "":
+                                                            break
+                                                        if tempHeaders[t] == opData[p][0]:
+                                                            # get value 1
+                                                            value1 = ""
+                                                            for r in range(0, len(columnNames)):
+                                                                if columnNames[r] == opData[p][1]:
+                                                                    value1 = m[r]
+                                                            # get value 1
+                                                            value2 = ""
+                                                            for r in range(0, len(columnNames)):
+                                                                if columnNames[r] == opData[p][3]:
+                                                                    value2 = m[r]
+                                                            value3 = ""
+                                                            if value1 == "":
+                                                                value1 = str(opData[p][1])
+                                                            if value2 == "":
+                                                                value2 = str(opData[p][3])
+                                                            if opData[p][2] == "+":
+                                                                value3 = str(float(value1) + float(value2))
+                                                            elif opData[p][2] == "-":
+                                                                value3 = str(float(value1) - float(value2))
+                                                            elif opData[p][2] == "/":
+                                                                value3 = str(round(float(value1) / float(value2), 5))
+                                                            elif opData[p][2] == "*":
+                                                                value3 = str(round(float(value1) * float(value2), 5))
+                                                            tempPush[t] = value3
+                                                            numModified += 1
+                                                if not foundName:
+                                                    for b1 in range(0, len(tempHeaders)):
+                                                        if tempHeaders[b1] == opData[p][0]:
+                                                            # get value1
+                                                            value1 = ""
+                                                            for r in range(0, len(columnNames)):
+                                                                if columnNames[r] == opData[p][1]:
+                                                                    value1 = m[r]
+                                                            # get value 1
+                                                            value2 = ""
+                                                            for r in range(0, len(columnNames)):
+                                                                if columnNames[r] == opData[p][3]:
+                                                                    value2 = m[r]
+                                                            value3 = ""
+                                                            if value1 == "":
+                                                                value1 = str(opData[p][1])
+                                                            if value2 == "":
+                                                                value2 = str(opData[p][3])
+                                                            if opData[p][2] == "+":
+                                                                value3 = str(float(value1) + float(value2))
+                                                            elif opData[p][2] == "-":
+                                                                value3 = str(float(value1) - float(value2))
+                                                            elif opData[p][2] == "/":
+                                                                value3 = str(round(float(value1) / float(value2), 5))
+                                                            elif opData[p][2] == "*":
+                                                                value3 = str(round(float(value1) * float(value2), 5))
+                                                            tempPush[b1] = value3
+                                                            numModified += 1
+                            tempNewRows.append(tempPush)
+
+                        toConsole("[INFO] Found " + str(numModified) + " modified elements for database " + str(g))
+                        ### check cutoffs begin ###
+                        newElement = 0
+                        updatedElement = 0
+                        deletedElement = 0
+                        removedCount = 0
+                        for b1 in databaseTriggers:
+                            if b1[0] == g:
+                                newElement = int(b1[1])
+                                updatedElement = int(b1[2])
+                                deletedElement = int(b1[3])
+                        if updatedElement == 1:
+                            for c1 in range(0, len(databaseUpdateTriggers)):
+                                if databaseUpdateTriggers[c1][0] == g:
+                                    for c2 in range(0, len(tempHeaders)):
+                                        if tempHeaders[c2].lower() == databaseUpdateTriggers[c1][1].lower():
+                                            d = 0
+                                            while d < len(tempNewRows):
+                                                if databaseUpdateTriggers[c1][2] == ">":
+                                                    if float(tempNewRows[d][c2]) <= float(
+                                                            databaseUpdateTriggers[c1][3]):
+                                                        tempNewRows.pop(d)
+                                                        d -= 1
+                                                        removedCount += 1
+                                                elif databaseUpdateTriggers[c1][2] == "<":
+                                                    if float(tempNewRows[d][c2]) >= float(
+                                                            databaseUpdateTriggers[c1][3]):
+                                                        tempNewRows.pop(d)
+                                                        d -= 1
+                                                        removedCount += 1
+                                                elif databaseUpdateTriggers[c1][2] == ">=":
+                                                    if float(tempNewRows[d][c2]) < float(databaseUpdateTriggers[c1][3]):
+                                                        tempNewRows.pop(d)
+                                                        d -= 1
+                                                        removedCount += 1
+                                                elif databaseUpdateTriggers[c1][2] == "<=":
+                                                    if float(tempNewRows[d][c2]) > float(databaseUpdateTriggers[c1][3]):
+                                                        tempNewRows.pop(d)
+                                                        d -= 1
+                                                        removedCount += 1
+                                                elif databaseUpdateTriggers[c1][2] == "=":
+                                                    if float(tempNewRows[d][c2]) != float(
+                                                            databaseUpdateTriggers[c1][3]):
+                                                        tempNewRows.pop(d)
+                                                        d -= 1
+                                                        removedCount += 1
+                                                d += 1
+                        else:
+                            toConsole("[INFO] Cutoffs toggled OFF for database " + g)
+                        toConsole("[INFO] Not adding " + str(
+                            removedCount) + " rows for database " + g + " because of cutoffs")
+                        toConsole("[INFO] Adding " + str(len(tempNewRows)) + " rows to database " + g)
+                        ### end of check cutoff ###
+
+                        for t1 in range(0, len(databaseName)):
+                            if databaseName[t1] == g:
+                                databaseData[t1].extend(tempNewRows)
+
+                    databaseIndex += 1
+        ### end ###
+
+    toConsole("[INFO] Finished syncing after " + str(currentSyncTime) + " seconds")
+
+#add operation button
+def onButtonPull8(event):
+    rawOperationAdd = ex.t4.GetValue()
+    value1 = ""
+    value2 = ""
+    value3 = ""
+    value4 = ""
+    valCounter = 0
+    valHolder = ""
+    for i in rawOperationAdd:
+        if i == " ":
+            if valCounter == 0:
+                value1 = valHolder
+            elif valCounter == 2:
+                value2 = valHolder
+            elif valCounter == 3:
+                value3 = valHolder
+            valHolder = ""
+            valCounter += 1
+        else:
+            valHolder += i
+    value4 = valHolder
+
+    if value1 != "" and value2 != "" and value3 != "" and value4 != "":
+        tempHeaders = []
+        foundT1 = False
+        for a in databaseHeaders:
+            if a[0] == operationDBName:
+                for y in range(1, len(a)):
+                    if a[y] != "":
+                        tempHeaders.append(a[y].lower())
+                        foundT1 = True
+        if not foundT1:
+            toConsole("[ERROR] Could not find headers for database")
+            return
+
+
+        tempHeadersSource = []
+        foundT2 = False
+        for a in databaseHeaders:
+            if a[0] == sourceDatabase:
+                for y in range(1, len(a)):
+                    if a[y] != "":
+                        tempHeadersSource.append(a[y].lower())
+                        foundT2 = True
+        if not foundT2:
+            toConsole("[ERROR] Could not find headers for source database")
+            return
+
+        value1 = value1.lower()
+        value2 = value2.lower()
+        value4 = value4.lower()
+        foundVal1 = False
+        for x in tempHeaders:
+            if x == value1:
+                foundVal1 = True
+                break
+        if not foundVal1:
+            toConsole("[ERROR] Could not find value: " + value1)
+            return
+
+        foundVal2 = False
+        for x in tempHeadersSource:
+            if x == value2:
+                foundVal2 = True
+                break
+        if not foundVal2:
+            toConsole("[ERROR] Could not find value: " + value2 + " in source database headers")
+            return
+
+        haveOperationAlready = False
+
+        for o in databaseOperationData:
+            if o[0] == operationDBName:
+                for k in range(1, len(o)):
+                    if o[k][0] != "":
+                        for m in tempHeaders:
+                            if value1 == o[k][0]:
+                                haveOperationAlready = True
+                                break
+
+        if haveOperationAlready:
+            toConsole("[ERROR] Value: " + value1 + " already has an operation, delete it to add this one")
+            return
+
+        counterV = -1
+        for o in databaseOperationData:
+            counterV+=1
+            if o[0] == operationDBName:
+                databaseOperationData[counterV].append([value1,value2,value3,value4])
+                break
+
+        toConsole("[INFO] Added operation successfully")
+        ex.lst8.Clear()
+        numOperations = 0
+        for i in databaseOperationData:
+            if i[0] == operationDBName:
+                for h in range(1, len(i)):
+                    if i[h][0] != "":
+                        appStr = i[h][0]
+                        appStr += " = "
+                        appStr += i[h][1]
+                        appStr += " "
+                        appStr += i[h][2]
+                        appStr += " "
+                        appStr += i[h][3]
+                        ex.lst8.Append(appStr)
+                        numOperations += 1
+        if numOperations == 0:
+            ex.lst8.Append("None")
+
+    else:
+        toConsole("[ERROR] Blank value detected when adding operation, not adding")
+
+
+
+#save operation button
+def onButtonPull9(event):
+    opNum = 0
+    for i in databaseOperationData:
+        tempStr = i[0] + "_operations.csv"
+        tempRows = []
+        for j in range(1, len(i)):
+            tempRows.append(i[j])
+        fileExists = exists(tempStr)
+        if fileExists:
+            with open(tempStr, 'w', newline='') as f:
+                thewriter = csv.writer(f)
+                for v in tempRows:
+                    if v[0] != "":
+                        opNum +=1
+                        thewriter.writerow(v)
+
+    toConsole("[INFO] Successfully saved " + str(opNum) + " operations")
+
+
+def onButtonPull(event):
+    dbName = ex.t1.GetValue()
+    radioVal = ex.rb1.GetValue()
+    try:
+        dbKey = int(ex.t2.GetValue())
+    except:
+        toConsole("[ERROR] Must put integer for key")
+        return
+
+    if(dbName==""):
+        toConsole("[ERROR] Must enter value for database name")
+        return
+
+    if radioVal:
+        dbName2 = dbName + ".csv"
+        file_exists = exists(dbName2)
+        if not file_exists:
+            toConsole("[ERROR] CSV" + dbName2 + " was not found")
+            return
+        else:
+            pullDataFromDatabase(dbName, radioVal, dbKey)
+    else:
+        toConsole("[ERROR] Could not connect to " + dbName)
+
+    print(ex.rb1.GetValue())
+
+#configure operations select database name
+def onButtonPull6(event):
+    global optionDBName
+    for i in databaseOptionData:
+        if i[0] == optionDBName:
+            pullDataFromDatabase(optionDBName, i[1], i[2])
+
+
+def onButtonPull5(event):
+    if sourceDatabase == "none" or sourceDatabase == "":
+        toConsole("[ERROR] No source database selected")
+        return
+    if len(databaseName) < 2:
+        toConsole("[ERROR] Must have at least one database to sync with")
+        return
+
+    ### pull from source database ###
+    print("pull from source database here...")
+    toConsole("Still need to make this")
+
+
+def onButtonPull4(event):
+    dbName = ex.t4.GetValue()
+
+    canSet = False
+    for i in databaseName:
+        if i == dbName:
+            canSet = True
+            if dbName == sourceDatabase:
+                toConsole("[INFO] " + dbName + " is already the source database")
+                return
+            break
+    if canSet:
+        toConsole("[INFO] Set " + dbName + " as the source database")
+        saveSourceDatabase(dbName)
+        ex.lst.Clear()
+        ex.lst.Append("Clear")
+        ex.lst2.Clear()
+        ex.lst2.Append("Clear")
+        ex.lst6.Clear()
+        ex.lst6.Append("Clear")
+        for a in databaseName:
+            if a == sourceDatabase:
+                ex.lst.Append(a + " (s)")
+                ex.lst2.Append(a + " (s)")
+                ex.lst6.Append(a + " (s)")
+            else:
+                ex.lst.Append(a)
+                ex.lst2.Append(a)
+                ex.lst6.Append(a)
+    else:
+        toConsole("[ERROR] Could not find database: " + dbName)
+
+def onButtonPull3(event):
+    try:
+        savedCount = 0
+        listOfColumns = []
+        for a in databaseHeaders:
+            if a[0] == triggerDBName:
+                for y in range(1, len(a)):
+                    if a[y] != "":
+                        listOfColumns.append(a[y].lower())
+
+        for i in listOfColumns:
+            searchName = triggerDBName + "." + i + ".csv"
+            with open(searchName, 'w', newline='') as f:
+                thewriter = csv.writer(f)
+                for x in databaseUpdateTriggers:
+                    if x[0] == triggerDBName and x[1].lower() == i:
+                        thewriter.writerow(x)
+                        savedCount += 1
+        toConsole("[INFO] Saved " + str(savedCount) + " cutoffs for database " + triggerDBName)
+
+    except:
+        toConsole("[ERROR] Could not save cutoff data for database  " + triggerDBName)
+
+    #print(ex.rb1.GetValue())
+
+def onButtonPull2(event):
+    global databaseUpdateTriggers
+    rawTrigger = ex.t3.GetValue()
+    value1 = ""
+    value2 = ""
+    value3 = ""
+    holder = ""
+    justGot = False
+    containsBoolG = rawTrigger.find(">=")
+
+    containsBoolL = rawTrigger.find("<=")
+    haveBools = False
+
+    if containsBoolG > 0 or containsBoolL > 0:
+        haveBools = True
+    for i in range(len(rawTrigger)):
+        if not justGot:
+            if haveBools:
+                if i == containsBoolG or i == containsBoolL:
+                    if containsBoolG > 0:
+                        if i == containsBoolG:
+                            justGot = True
+                            value1 = holder
+                            value2 = ">="
+                            holder = ""
+                    if containsBoolL > 0:
+                        if i == containsBoolL:
+                            justGot = True
+                            value1 = holder
+                            value2 = "<="
+                            holder = ""
+                else:
+                    holder = holder + rawTrigger[i]
+            else:
+                if rawTrigger[i] == ">" or rawTrigger[i] == "<" or rawTrigger[i] == "=":
+                    value1 = holder
+                    holder = ""
+                    value2 = rawTrigger[i]
+                else:
+                    holder = holder + rawTrigger[i]
+        else:
+            justGot = False
+
+    value3 = holder
+
+    tempVal = ""
+    for i in value1:
+        if i != ' ':
+            tempVal = tempVal + i
+    value1 = tempVal
+    tempVal = ""
+    for i in value2:
+        if i != ' ':
+            tempVal = tempVal + i
+    value2 = tempVal
+    tempVal = ""
+    for i in value3:
+        if i != ' ':
+            tempVal = tempVal + i
+    value3 = tempVal
+    tempVal = ""
+
+    #get triggers and do checks
+    canUse = False
+    for a in databaseHeaders:
+        if triggerDBName == a[0]:
+            for b in range(1,len(a)):
+                testString = a[b].lower()
+                testString.replace(' ', '')
+                if str(value1.lower()) == str(testString):
+                    canUse = True
+    if not canUse:
+        toConsole("[ERROR] Could not find value:" + value1)
+        return
+    alreadyGot = False
+    for i in databaseUpdateTriggers:
+        if i[0] == triggerDBName:
+            if i[1] == value1 and i[2] == value2 and i[3] == value3:
+                alreadyGot = True
+                break
+    if alreadyGot:
+        toConsole("[ERROR] Cutoff already exists")
+        return
+
+    try:
+        if value1 != "" and value2 != "" and value3 != "":
+            u = 0
+            startingOutBool = True
+            while u < len(databaseUpdateTriggers):
+                if u >= len(databaseUpdateTriggers):
+                    break
+                if startingOutBool:
+                    startingOutBool = False
+                else:
+                    u+=1
+                    if u >= len(databaseUpdateTriggers):
+                        break
+                    if len(databaseUpdateTriggers[u]) < 4:
+                        break
+                checkingType = True
+                if databaseUpdateTriggers[u][3] == "none":
+                    u+=1
+                while checkingType:
+                    if u >= len(databaseUpdateTriggers):
+                        break
+                    try:
+                        tempT = float(databaseUpdateTriggers[u][3])
+                    except:
+                        u += 1
+                    else:
+                        checkingType = False
+                if u >= len(databaseUpdateTriggers):
+                    break
+                if databaseUpdateTriggers[u][0] == triggerDBName:
+                    if databaseUpdateTriggers[u][1].lower() == value1.lower():
+                        if value2 == ">" and databaseUpdateTriggers[u][2] == ">":
+                            if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] Cutoff already covered, not adding")
+                                return
+                            else:
+                                toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                del databaseUpdateTriggers[u]
+                                u-=1
+                        if value2 == "<" and databaseUpdateTriggers[2] == "<":
+                            if float(value3) < float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] cutoff already covered, not adding")
+                                return
+                            else:
+                                toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                del databaseUpdateTriggers[u]
+                                u -= 1
+                        if value2 == ">=" and databaseUpdateTriggers[u][2] == ">":
+                            if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] Cutoff already covered, not adding")
+                                return
+                            else:
+                                toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                del databaseUpdateTriggers[u]
+                                u -= 1
+                        if value2 == "<=" and databaseUpdateTriggers[u][2] == "<":
+                            if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] Cutoff already covered, not adding")
+                                return
+                            else:
+                                toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                del databaseUpdateTriggers[u]
+                                u -= 1
+
+                        if (value2 == ">=" and databaseUpdateTriggers[u][2] == ">=") or (value2 == ">" and databaseUpdateTriggers[u][2] == ">="):
+                            if(value2 == ">"):
+                                if float(value3) == float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                                else:
+                                    if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                        toConsole("[WARNING] Cutoff already covered, not adding")
+                                        return
+                                    else:
+                                        toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                        del databaseUpdateTriggers[u]
+                                        u -= 1
+                            else:
+                                if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                                else:
+                                    toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                    del databaseUpdateTriggers[u]
+                                    u -= 1
+                        if (value2 == "<=" and databaseUpdateTriggers[u][2] == "<=") or (value2 == "<" and databaseUpdateTriggers[u][2] == "<="):
+                            if(value2 == "<"):
+                                if float(value3) == float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                                else:
+                                    if float(value3) < float(databaseUpdateTriggers[u][3]):
+                                        toConsole("[WARNING] Cutoff already covered, not adding")
+                                        return
+                                    else:
+                                        toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                        del databaseUpdateTriggers[u]
+                                        u -= 1
+                            else:
+                                if float(value3) < float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                                else:
+                                    toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                    del databaseUpdateTriggers[u]
+                                    u -= 1
+                        if value2 == "=" and databaseUpdateTriggers[u][2].find(">") != -1:
+                            if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] Cutoff already covered, not adding")
+                                return
+                            if float(value3) == float(databaseUpdateTriggers[u][3]) and databaseUpdateTriggers[u][2].find(">=") != -1:
+                                if float(value3) >= float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                        if databaseUpdateTriggers[u][2] == "=" and value2.find(">") != -1:
+                            if float(value3) < float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                del databaseUpdateTriggers[u]
+                                u -= 1
+                            if float(value3) == float(databaseUpdateTriggers[u][3]) and value2.find(">=") != -1:
+                                if float(value3) < float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                        #
+                        if value2 == "=" and databaseUpdateTriggers[u][2].find("<") != -1:
+                            if float(value3) < float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] Cutoff already covered, not adding")
+                                return
+                            if float(value3) == float(databaseUpdateTriggers[u][3]) and databaseUpdateTriggers[u][2].find("<=") != -1:
+                                if float(value3) <= float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+                        if databaseUpdateTriggers[u][2] == "=" and value2.find("<") != -1:
+                            if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                toConsole("[WARNING] New cutoff covers existing cutoff, removing covered cutoff")
+                                del databaseUpdateTriggers[u]
+                                u -= 1
+                            if float(value3) == float(databaseUpdateTriggers[u][3]) and value2.find("<=") != -1:
+                                if float(value3) > float(databaseUpdateTriggers[u][3]):
+                                    toConsole("[WARNING] Cutoff already covered, not adding")
+                                    return
+
+
+
+            toConsole("[INFO] Added cutoff: " + rawTrigger)
+            databaseUpdateTriggers.append([triggerDBName, value1, value2, value3])
+            ex.lst5.Clear()
+            for z in databaseUpdateTriggers:
+                if z[0] == triggerDBName:
+                    addStr = str(z[1]).lower() + " " + str(z[2]) + " " + str(z[3])
+                    ex.lst5.Append(addStr)
+
+        else:
+            toConsole("[ERROR] Obtained blank value when trying to add cutoff")
+            return
+    except:
+        toConsole("[INFO] Added cutoff: " + rawTrigger)
+        databaseUpdateTriggers.append([triggerDBName, value1, value2, value3])
+        ex.lst5.Clear()
+        for z in databaseUpdateTriggers:
+            if z[0] == triggerDBName:
+                addStr = str(z[1]).lower() + " " + str(z[2]) + " " + str(z[3])
+                ex.lst5.Append(addStr)
+
+
+
+
+def onListBox(event):
+
+    selection = event.GetEventObject().GetStringSelection()
+    for x in databaseName:
+        if x + " (s)" == selection:
+            selection = x
+    ex.textDisp.Clear()
+    allText = ""
+    if selection == "Clear":
+        toConsole("[INFO] Cleared view databases")
+        return
+    for i in range(len(databaseName)):
+        if databaseName[i] == selection:
+            allText = ""
+            for g in databaseHeaders:
+                if g[0] == selection:
+                    for v in range(1, len(g)):
+                        if v != 1:
+                            allText += ", "
+                        allText+="["
+                        allText += g[v]
+                        allText += "]"
+                    allText += "\n"
+            for x in databaseData[i]:
+                if x[0] != "":
+                    allText += str(x) + "\n"
+            break
+
+    ex.textDisp.AppendText(allText)
+
+#for triggers!
+def onListBox2(event):
+    selection = event.GetEventObject().GetStringSelection()
+    for x in databaseName:
+        if x + " (s)" == selection:
+            selection = x
+            toConsole("[WARNING] Cannot configure cutoffs for source database")
+            return
+    global triggerDBName
+    triggerDBName = selection
+    ex.lst3.Clear()
+    if selection == "Clear":
+        toConsole("[INFO] Cleared configure cutoffs")
+        ex.lst4.Clear()
+        ex.lst5.Clear()
+
+    for i in range(len(databaseName)):
+        if databaseName[i] == selection:
+            firstRun = True
+            for g in range(len(databaseTriggers[i])):
+                if firstRun:
+                    firstRun = False
+                else:
+                    trueConvert = ""
+                    if databaseTriggers[i][g] == 1:
+                        trueConvert = "True"
+                    else:
+                        trueConvert = "False"
+                    if g == 1:
+                        ex.lst3.Append("New Element (" + trueConvert + ")")
+                    if g == 2:
+                        ex.lst3.Append("Updated Element (" + trueConvert + ")")
+                    if g == 3:
+                        ex.lst3.Append("Deleted Element (" + trueConvert + ")")
+
+
+
+def onListBox3(event):
+    selection = event.GetEventObject().GetStringSelection()
+
+    if selection == "New Element (False)":
+        toConsole("[INFO] Changed new element cutoff to true for database " + triggerDBName)
+        updateTriggers(triggerDBName, "new")
+    elif selection == "New Element (True)":
+        toConsole("[INFO] Changed new element cutoff to false for database " + triggerDBName)
+        updateTriggers(triggerDBName, "new")
+
+    if selection == "Deleted Element (False)":
+        toConsole("[INFO] Changed deleted element cutoff to true for database " + triggerDBName)
+        updateTriggers(triggerDBName, "deleted")
+    elif selection == "Deleted Element (True)":
+        toConsole("[INFO] Changed deleted element cutoff to false for database " + triggerDBName)
+        updateTriggers(triggerDBName, "deleted")
+
+    doingUpdated = False
+
+    if selection == "Updated Element (False)":
+        doingUpdated = True
+        toConsole("[INFO] Opening updated element options for " + triggerDBName)
+    elif selection == "Updated Element (True)":
+        doingUpdated = True
+        toConsole("[INFO] Opening updated element options for " + triggerDBName)
+
+    if doingUpdated:
+        for i in range(len(databaseName)):
+            if databaseName[i] == triggerDBName:
+                ex.lst4.Clear()
+                trueConvert = ""
+                if databaseTriggers[i][2] == 1:
+                    trueConvert = "True"
+                else:
+                    trueConvert = "False"
+                ex.lst4.Append("Toggle All (" + trueConvert + ")")
+
+                if showAllTriggers:
+                    trueConvert = "True"
+                else:
+                    trueConvert = "False"
+
+                ex.lst4.Append("Show All (" + trueConvert + ")")
+
+                for a in databaseHeaders:
+                    if a[0] == triggerDBName:
+                        for v in range(1, len(a)):
+                            ex.lst4.Append(a[v])
+                return
+    else:
+        ex.lst4.Clear()
+        ex.lst5.Clear()
+    ex.lst3.Clear()
+    for i in range(len(databaseName)):
+        if databaseName[i] == triggerDBName:
+            firstRun = True
+            for g in range(len(databaseTriggers[i])):
+                if firstRun:
+                    firstRun = False
+                else:
+                    trueConvert = ""
+                    if databaseTriggers[i][g] == 1:
+                        trueConvert = "True"
+                    else:
+                        trueConvert = "False"
+
+                    if g == 1:
+                        ex.lst3.Append("New Element (" + trueConvert + ")")
+                    if g == 2:
+                        ex.lst3.Append("Updated Element (" + trueConvert + ")")
+                    if g == 3:
+                        ex.lst3.Append("Deleted Element (" + trueConvert + ")")
+
+def onListBox4(event):
+    global databaseUpdateTriggers
+    selection = event.GetEventObject().GetStringSelection()
+
+    toggledAll = False
+    global showAllTriggers
+    changedShowAll = False
+    if selection == "Show All (True)":
+        toConsole("[INFO] Changed show all to false for database " + triggerDBName)
+        showAllTriggers = False
+        changedShowAll = True
+    elif selection == "Show All (False)":
+        toConsole("[INFO] Changed show all to true for database " + triggerDBName)
+        showAllTriggers = True
+        changedShowAll = True
+
+    if selection == "Toggle All (True)":
+        toConsole("[INFO] Changed updated element cutoff to false for database " + triggerDBName)
+        updateTriggers(triggerDBName, "updated")
+        toggledAll = True
+    elif selection == "Toggle All (False)":
+        toConsole("[INFO] Changed updated element cutoff to true for database " + triggerDBName)
+        updateTriggers(triggerDBName, "updated")
+        toggledAll = True
+
+    if changedShowAll:
+        if not showAllTriggers:
+            ex.lst5.Clear()
+            ex.lst5.Append("None")
+            for i in range(len(databaseName)):
+                if databaseName[i] == triggerDBName:
+                    ex.lst4.Clear()
+                    trueConvert = ""
+                    if databaseTriggers[i][2] == 1:
+                        trueConvert = "True"
+                    else:
+                        trueConvert = "False"
+                    ex.lst4.Append("Toggle All (" + trueConvert + ")")
+
+                    if showAllTriggers:
+                        trueConvert = "True"
+                    else:
+                        trueConvert = "False"
+
+                    ex.lst4.Append("Show All (" + trueConvert + ")")
+
+                    for a in databaseHeaders:
+                        if a[0] == triggerDBName:
+                            for v in range(1,len(a)):
+                                ex.lst4.Append(a[v])
+
+            return
+
+        for i in range(len(databaseName)):
+            if databaseName[i] == triggerDBName:
+                ex.lst4.Clear()
+                trueConvert = ""
+                if databaseTriggers[i][2] == 1:
+                    trueConvert = "True"
+                else:
+                    trueConvert = "False"
+                ex.lst4.Append("Toggle All (" + trueConvert + ")")
+
+                if showAllTriggers:
+                    trueConvert = "True"
+                else:
+                    trueConvert = "False"
+
+                ex.lst4.Append("Show All (" + trueConvert + ")")
+
+                for a in databaseHeaders:
+                    if a[0] == triggerDBName:
+                        for v in range(1, len(a)):
+                            ex.lst4.Append(a[v])
+
+        ex.lst5.Clear()
+        addedOne = False
+        for i in databaseUpdateTriggers:
+            if i[0] == triggerDBName:
+                addedOne = True
+                txtAdd = i[1] + " " + i[2] + " " + i[3]
+                ex.lst5.Append(txtAdd)
+        if not addedOne:
+            ex.lst5.Append("None")
+        return
+
+    if toggledAll:
+        for i in range(len(databaseName)):
+            if databaseName[i] == triggerDBName:
+                ex.lst4.Clear()
+                trueConvert = ""
+                if databaseTriggers[i][2] == 1:
+                    trueConvert = "True"
+                else:
+                    trueConvert = "False"
+                ex.lst4.Append("Toggle All (" + trueConvert + ")")
+
+                if showAllTriggers:
+                    trueConvert = "True"
+                else:
+                    trueConvert = "False"
+
+                ex.lst4.Append("Show All (" + trueConvert + ")")
+
+                for a in databaseHeaders:
+                    if a[0] == triggerDBName:
+                        for v in range(1, len(a)):
+                            ex.lst4.Append(a[v])
+        ex.lst3.Clear()
+        for i in range(len(databaseName)):
+            if databaseName[i] == triggerDBName:
+                firstRun = True
+                for g in range(len(databaseTriggers[i])):
+                    if firstRun:
+                        firstRun = False
+                    else:
+                        trueConvert = ""
+                        if databaseTriggers[i][g] == 1:
+                            trueConvert = "True"
+                        else:
+                            trueConvert = "False"
+                        if g == 1:
+                            ex.lst3.Append("New Element (" + trueConvert + ")")
+                        if g == 2:
+                            ex.lst3.Append("Updated Element (" + trueConvert + ")")
+                        if g == 3:
+                            ex.lst3.Append("Deleted Element (" + trueConvert + ")")
+    #if not toggled all
+    else:
+        updateTriggersFound = []
+        for i in databaseUpdateTriggers:
+            if i[0] == triggerDBName:
+                updateTriggersFound.append(i)
+        if len(updateTriggersFound) == 0:
+            searchName = triggerDBName + "." + selection + ".csv"
+            searchName2 = triggerDBName + "." + selection
+            file_exists = exists(searchName)
+            if(file_exists):
+                updateTriggersFoundTest = readCSV(searchName2)
+                for w in updateTriggersFoundTest:
+                    for g in databaseUpdateTriggers:
+                        passed = True
+                        for f in range(len(w)):
+                            if w[f] != g[f]:
+                                passed = False
+                                break
+                        if passed:
+                            updateTriggersFound.append(updateTriggersFoundTest)
+            else:
+                toConsole("[WARNING] " + searchName + " does not exist, creating blank one")
+                with open(searchName, 'w', newline='') as f:
+                    thewriter = csv.writer(f)
+                    thewriter.writerow(["", "", ""])
+
+            if len(updateTriggersFound) > 0:
+                databaseUpdateTriggers.append(updateTriggersFound)
+                toConsole("[INFO] Found " + str(len(updateTriggersFound)) + " triggers for " + triggerDBName)
+            else:
+                toConsole("[WARNING] Did not find any cutoffs for " + selection + ", " + triggerDBName)
+                addedOne = False
+                ex.lst5.Clear()
+                for i in databaseUpdateTriggers:
+                    if i[0] == triggerDBName:
+                        addedOne = True
+                        txtAdd = i[1] + " " + i[2] + " " + i[3]
+                        ex.lst5.Append(txtAdd)
+                if not addedOne:
+                    ex.lst5.Append("None")
+        else:
+            addedOne = False
+            ex.lst5.Clear()
+            for i in databaseUpdateTriggers:
+                if i[0] == triggerDBName and i[1].lower() == selection.lower():
+                    addedOne = True
+                    txtAdd = i[1] + " " + i[2] + " " + i[3]
+                    ex.lst5.Append(txtAdd)
+            if not addedOne:
+                ex.lst5.Append("None")
+
+
+def onListBox5(event):
+    addedOne = False
+    selection = event.GetEventObject().GetStringSelection()
+    global databaseUpdateTriggers
+    counter = 0
+    while counter < len(databaseUpdateTriggers):
+        if triggerDBName == databaseUpdateTriggers[counter][0]:
+            txtAdd = str(databaseUpdateTriggers[counter][1]).lower() + " " + databaseUpdateTriggers[counter][2] + " " + databaseUpdateTriggers[counter][3]
+            if txtAdd == selection.lower():
+                databaseUpdateTriggers.pop(counter)
+                toConsole("[INFO] Removed cutoff: " + txtAdd)
+        counter+=1
+
+
+    ex.lst5.Clear()
+    for i in databaseUpdateTriggers:
+        if i[0] == triggerDBName:
+            addedOne = True
+            txtAdd = str(i[1]).lower() + " " + i[2] + " " + i[3]
+            ex.lst5.Append(txtAdd)
+    if not addedOne:
+        ex.lst5.Append("None")
+
+def onListBox6(event):
+    selection = event.GetEventObject().GetStringSelection()
+    global operationDBName
+    for x in databaseName:
+        if x + " (s)" == selection:
+            selection = x
+            toConsole("[WARNING] Cannot configure operations for source database!")
+            ex.lst7.Clear()
+            ex.lst8.Clear()
+            return
+    operationDBName = selection
+    storedData = []
+
+    if selection == "Clear":
+        toConsole("[INFO] Cleared configure operations")
+        ex.lst7.Clear()
+        ex.lst8.Clear()
+        return
+
+    for a in databaseOptionData:
+        if a[0] == selection:
+            storedData = a
+            break
+
+    ex.lst7.Clear()
+    for i in databaseHeaders:
+        if i[0] == selection:
+            for x in range(1, len(i)):
+                ex.lst7.Append(i[x])
+
+    ex.lst8.Clear()
+    numOperations = 0
+    for i in databaseOperationData:
+        if i[0] == selection:
+            for h in range(1, len(i)):
+                if i[h][0] != "":
+                    appStr = i[h][0]
+                    appStr += " = "
+                    appStr += i[h][1]
+                    appStr += " "
+                    appStr += i[h][2]
+                    appStr += " "
+                    appStr += i[h][3]
+                    ex.lst8.Append(appStr)
+                    numOperations+=1
+    if numOperations == 0:
+        ex.lst8.Append("None")
+
+
+#if we want to list the headers
+def onListBox7(event):
+    return
+
+#if we want to list the headers
+def onListBox8(event):
+    selection = event.GetEventObject().GetStringSelection()
+
+    global operationDBName
+    global databaseOperationData
+
+    counter = 0
+
+
+    counter1 = -1
+    for i in databaseOperationData:
+        counter1 +=1
+        if i[0] == operationDBName:
+            for g in range(1, len(i)):
+                counter+=1
+                if i[g][0] != "":
+                    tempVar = i[g][0] + " = " + i[g][1] + " " + i[g][2] + " " + i[g][3]
+                    if tempVar == selection:
+                        toConsole("[INFO] Removed operation: " + tempVar)
+                        databaseOperationData[counter1].pop(counter)
+                        break
+
+    ex.lst8.Clear()
+    numOperations = 0
+    for i in databaseOperationData:
+        if i[0] == selection:
+            for h in range(1, len(i)):
+                if i[h][0] != "":
+                    appStr = i[h][0]
+                    appStr += " = "
+                    appStr += i[h][1]
+                    appStr += " "
+                    appStr += i[h][2]
+                    appStr += " "
+                    appStr += i[h][3]
+                    ex.lst8.Append(appStr)
+                    numOperations += 1
+    if numOperations == 0:
+        ex.lst8.Append("None")
+
+def getCutoffData(dbName, headerList):
+    for i in headerList:
+        tempStr = dbName + "." + i + ".csv"
+        fileExists = exists(tempStr)
+        if fileExists:
+            tempStr2 = dbName + "." + i
+            data = readCSV(tempStr2)
+            for g in data:
+                databaseUpdateTriggers.append(g)
+
+
+
+#test selection button clicked (execute)
+def onButtonSelect(event):
+    selection = ex.testSelector.GetValue()
+
+    if selection == "CSV All Data":
+        populateCSV("tempData", 1, 101, 'w')
+        data = readCSV("tempData")
+        addOldData("temperature", data, "hasdiff")
+
+        pullDataFromDatabase("tempData", True, -1)
+
+        populateCSV("tempData", 101, 151, 'a')
+        data = readCSV("tempData")
+        addOldData("temperature", data, "finddiff")
+        pullDataFromDatabase("tempData", True, -1)
+
+        deleteRowFromCSV("tempData", [3, 50])
+        data = readCSV("tempData")
+        addOldData("temperature", data, "finddiff")
+        pullDataFromDatabase("tempData", True, -1)
+
+    elif selection == "Create New Trigger Data":
+        populateCSV("newTriggerData", 1, 11, 'w')
+        toConsole("[INFO] Created new blank trigger data with 10 rows")
+
+    elif selection == "Add 10 Triggered Rows":
+        global addTrigDataCounter
+        populateCSV("newTriggerData", addTrigDataCounter, int(addTrigDataCounter + 10), 'a')
+        addTrigDataCounter += 10
+        toConsole("[INFO] Created new blank trigger data with 10 rows")
+
+    elif selection == "Blank DB":
+        with open("blankDataBase.csv", 'w', newline='') as f:
+            thewriter = csv.writer(f)
+            thewriter.writerow(["", "", ""])
+        pullDataFromDatabase("blankDataBase", True, 0)
+        databaseHeaders.append(["blankDataBase", "Time", "Power", "Temperature"])
+        getOperationData("blankDataBase")
+        tmpHeaders = ["Time", "Power", "Temperature"]
+        getCutoffData("blankDataBase", tmpHeaders)
+
+    elif selection == "Blank DB2":
+        with open("blankDB2.csv", 'w', newline='') as f:
+            thewriter = csv.writer(f)
+            thewriter.writerow(["", "", ""])
+        pullDataFromDatabase("blankDB2", True, 0)
+        databaseHeaders.append(["blankDB2", "Time", "Voltage", "Temperature"])
+        getOperationData("blankDB2")
+        tmpHeaders = ["Time", "Voltage", "Temperature"]
+        getCutoffData("blankDB2", tmpHeaders)
+
+    elif selection == "CSV New Data":
+        populateCSV("tempData", 1, 101, 'w')
+        data = readCSV("tempData")
+        addOldData("temperature", data, "hasdiff")
+        pullDataFromDatabase("tempData", True, 0)
+        # time.sleep(30)
+
+        populateCSV("tempData", 101, 151, 'a')
+        data = readCSV("tempData")
+        addOldData("temperature", data, "finddiff")
+        pullDataFromDatabase("tempData", True, 0)
+        # time.sleep(30)
+
+        deleteRowFromCSV("tempData", [3, 50])
+        pullDataFromDatabase("tempData", True, 0)
+
+        updateInfo = [[17, 1, 12], [71, 2, 5], [84, 1, 16]]
+        updateRowFromCSV("tempData", updateInfo)
+        pullDataFromDatabase("tempData", True, 0)
+        pullDataFromDatabase("tempData", True, 0)
+
+    elif selection == "Source DB":
+        blankDatabaseTest()
+
+app = wx.App()
+ex = UserInterface(None, title='Database Connector')
+ex.Show()
+
+######## End of Application Stuff ########
+
+#function to upload data
+def upload(uploadData):
+    print("uploaded data!")
+
+#make default csv, appendValue (w is overwrite, a is append)
+def populateCSV(csvName, time1, time2, appendValue):
+    csvName = csvName + ".csv"
+    with open(csvName, appendValue, newline='') as f:
+        thewriter = csv.writer(f)
+        if(appendValue != 'a'):
+            firstRow = ["Time", "Temperature", "Voltage"]
+            thewriter.writerow(firstRow)
+
+        #seed(1)
+        for iter in range(time2 - time1):
+            tempValue = randint(30, 100)
+            voltValue = randint(1, 10)
+            nextRow = [iter + time1, tempValue, voltValue]
+            thewriter.writerow(nextRow)
+
+#read csv and return it
+def readCSV(csvName):
+    csvName = csvName + ".csv"
+    firstLine = True
+    csvData = []
+
+    with open(csvName) as csvfile:
+        readCSV = csv.reader(csvfile, delimiter=',')
+        for row in readCSV:
+            csvData.append(row)
+    return csvData
+
+#if the input csv does not just return new data, find new data to add
+def inputFindDifference(csvName, inputData):
+    print("[INFO] uploading data (find difference)...")
+    toConsole("[INFO] uploading data (find difference)...")
+    uploaded = False
+    for iter in range(len(oldDataStorageName)):
+        if oldDataStorageName[iter] == csvName:
+            uploaded = True
+            dataToUpload = []
+            ### find difference here ###
+            for a in inputData:
+                doesntHave = True
+                for b in oldDataStorage[iter]:
+                    if len(b) == len(a):
+                        passedTest = True
+                        for c in range(len(b)):
+                            if a[c] != b[c]:
+                                passedTest = False
+                                break
+                        if passedTest:
+                            doesntHave = False
+                            break
+                if doesntHave:
+                    dataToUpload.append(a)
+
+            ### end finding difference ###
+            print("[INFO] Found " + str(len(dataToUpload)) + " new data elements")
+            toConsole("[INFO] Found " + str(len(dataToUpload)) + " new data elements")
+            oldDataStorage[iter] = inputData
+            upload(dataToUpload)
+
+    if(uploaded == False):
+        print("[WARNING] Could not upload " + csvName + " data")
+        toConsole("[WARNING] Could not upload " + csvName + " data")
+
+#if the input csv is only giving new data without old data
+def inputHasDifference(csvName):
+    print("[INFO] uploading data (has difference)...")
+    toConsole("[INFO] uploading data (has difference)...")
+    uploaded = False
+
+    for iter in range(len(oldDataStorageName)):
+        if oldDataStorageName[iter] == csvName:
+            uploaded = True
+            print("[INFO] Found " + str(len(oldDataStorage[iter])) + " new data elements")
+            toConsole("[INFO] Found " + str(len(oldDataStorage[iter])) + " new data elements")
+            upload(oldDataStorage[iter])
+    if(uploaded == False):
+        print("[WARNING] Could not upload " + csvName + " data")
+        toConsole("[WARNING] Could not upload " + csvName + " data")
+
+
+
+#add csv data to old data and upload it
+def addOldData(name, inputData, dataType):
+    print("")
+    hasData = False
+
+    #find if we have data for name already stored
+    for iter in range(len(oldDataStorageName)):
+        if(oldDataStorageName[iter] == name):
+            hasData = True
+            if(dataType == "hasdiff"):
+
+                removeLine = True
+                if len(inputData[0]) != len(oldDataStorage[iter][0]):
+                    removeLine = False
+                else:
+                    for a in range(len(inputData[0])):
+                        if inputData[0][a] != oldDataStorage[iter][a]:
+                            removeLine = False
+                            break
+                if(removeLine):
+                    del inputData[0]
+
+                oldDataStorage[iter] = inputData + oldDataStorage[iter]
+
+    if(hasData == False):
+        oldDataStorage.append(inputData)
+        oldDataStorageName.append(name)
+
+        toConsole("[INFO] Adding new old data")
+        print("[INFO] Adding new old data")
+
+    #upload data here based on dataType variable
+    if dataType == "hasdiff":
+        inputHasDifference(name)
+    elif dataType == "finddiff":
+        inputFindDifference(name, inputData)
+
+#test method for if input data has difference
+def hasDiffTest():
+    populateCSV("tempData", 1, 101, 'w')
+    data = readCSV("tempData")
+    addOldData("temperature", data, "hasdiff")
+
+    populateCSV("tempData", 101, 151, 'a')
+    data = readCSV("tempData")
+    addOldData("temperature", data, "finddiff")
+
+    populateCSV("tempData", 151, 201, 'a')
+    data = readCSV("tempData")
+    addOldData("temperature", data, "finddiff")
+
+#see what has changed in database
+def analyzeChangedData(data, indexValue, unchangedIndex):
+    print("[INFO] checking for changes in database...")
+    toConsole("[INFO] checking for changes in database...")
+
+    unchangedData = []
+    newData = []
+    deletedData = []
+    updatedData = []
+
+    updatedDataNew = []
+    updatedDataOld = []
+
+    #unchangeIndex of -1 means any column can change
+    if unchangedIndex == -1:
+        #check for deleted data and new data
+        for a in data:
+            hasRow = False
+            for b in databaseData[indexValue]:
+                passed = True
+                if len(a) != len(b):
+                    passed = False
+                else:
+                    for c in range(len(a)):
+                        if a[c] != b[c]:
+                            passed = False
+                            break
+                if passed:
+                    unchangedData.append(a)
+                    hasRow = True
+                    break
+            if not hasRow:
+                newData.append(a)
+
+        for a in databaseData[indexValue]:
+            passed = True
+            for b in data:
+                passed = True
+                if len(a) == len(b):
+                    for c in range(len(a)):
+                        if a[c] != b[c]:
+                            passed = False
+                            break
+                if passed:
+                    break
+            if not passed:
+                deletedData.append(a)
+
+        print("[INFO] Found " + str(len(unchangedData)) + " unchanged rows")
+        print("[INFO] Found " + str(len(newData)) + " new rows")
+        print("[INFO] Found " + str(len(deletedData)) + " deleted rows")
+        toConsole("[INFO] Found " + str(len(unchangedData)) + " unchanged rows")
+        toConsole("[INFO] Found " + str(len(newData)) + " new rows")
+        toConsole("[INFO] Found " + str(len(deletedData)) + " deleted rows")
+
+
+    #if we have an index for column that won't change
+    else:
+        for a in data:
+            newRow = True
+            for b in databaseData[indexValue]:
+                if len(a) == len(b):
+                    #1 = changed, 0 = unchanged, 2 for unchanged index
+                    newElements = []
+                    oldElements = []
+
+                    if a[unchangedIndex] == b[unchangedIndex]:
+                        updatedDataFound = False
+                        for c in range(len(a)):
+                            newElements.append(a[c])
+                            oldElements.append(b[c])
+                            if(a[c] != b[c]):
+                                updatedDataFound = True
+                        if updatedDataFound:
+                            updatedDataNew.append(newElements)
+                            updatedDataOld.append(oldElements)
+                            updatedData.append(newElements)
+                            newRow = False
+                            break
+                        else:
+                            newRow = False
+                            unchangedData.append(a)
+                            break
+            if newRow:
+                newData.append(a)
+
+        #check for deleted rows
+        for a in databaseData[indexValue]:
+            deleted = True
+            for b in data:
+                if a[unchangedIndex] == b[unchangedIndex]:
+                    deleted = False
+                    break
+            if deleted:
+                deletedData.append(a)
+
+        print("[INFO] Found " + str(len(unchangedData)) + " unchanged rows")
+        print("[INFO] Found " + str(len(newData)) + " new rows")
+        print("[INFO] Found " + str(len(updatedData)) + " updated rows")
+        print("[INFO] Found " + str(len(deletedData)) + " deleted rows")
+        toConsole("[INFO] Found " + str(len(unchangedData)) + " unchanged rows")
+        toConsole("[INFO] Found " + str(len(newData)) + " new rows")
+        toConsole("[INFO] Found " + str(len(updatedData)) + " updated rows")
+        toConsole("[INFO] Found " + str(len(deletedData)) + " deleted rows")
+
+        if len(newData) != 0:
+            databaseData[indexValue].extend(newData)
+        if len(updatedData) != 0:
+            for x in range(len(databaseData[indexValue])):
+                for y in updatedData:
+                    if databaseData[indexValue][x][unchangedIndex] == y[unchangedIndex]:
+                        databaseData[indexValue][x] = y
+                        break
+        if len(deletedData) != 0:
+            deletedCount = 0
+            for u in range(len(databaseData[indexValue])):
+                if u > len(databaseData[indexValue]) - deletedCount:
+                    break
+                for w in range(len(deletedData)):
+                    hasSame = True
+                    for v in range(len(databaseData[indexValue][u])):
+                        if deletedData[w][v] != databaseData[indexValue][u][v]:
+                            hasSame = False
+                            break
+                    if hasSame:
+                        deletedCount = deletedCount + 1
+                        del databaseData[indexValue][u]
+
+
+
+
+#get data from database
+def pullDataFromDatabase(dbName, pullCSV, unchangedIndex):
+    getSourceDatabase()
+    print("")
+    data = []
+    if(pullCSV):
+        data = readCSV(dbName)
+    else:
+        print("pull from real database here and put into csv")
+        toConsole("pull from real database here and put into csv")
+
+    #make new db data if needed
+    createNew = True
+    indexValue = 0
+    for i in range(len(databaseName)):
+        if databaseName[i] == dbName:
+            createNew = False
+            indexValue = i
+            break
+    if(createNew):
+        databaseName.append(dbName)
+        databaseData.append(data)
+
+        file_exists = exists("triggers.csv")
+        triggerData = []
+        haveDBTriggers = False
+        if file_exists:
+            toConsole("[INFO] Found triggers.csv")
+            triggerData = readCSV("triggers")
+            for a in triggerData:
+                if a[0] == dbName:
+                    haveDBTriggers = True
+                    databaseTriggers.append(a)
+
+            if haveDBTriggers:
+                toConsole("[INFO] Found cutoffs for " + dbName)
+            else:
+                toConsole("[WARNING] Did not find cutoffs for " + dbName + ", placing default values")
+                with open("triggers.csv", 'w', newline='') as f:
+                    thewriter = csv.writer(f)
+                    for g in triggerData:
+                        thewriter.writerow(g)
+                    thewriter.writerow([dbName, 1, 1, 1])
+                    databaseTriggers.append([dbName, 1, 1, 1])
+
+        else:
+            toConsole("[WARNING] triggers.csv file not found, creating blank file...")
+            with open("triggers.csv", 'w', newline='') as f:
+                thewriter = csv.writer(f)
+                thewriter.writerow(["DB Name", "New Element", "Updated Element", "Deleted Element"])
+
+        ### get triggers if there are any ###
+        savedCount = 0
+        listOfColumns = []
+        for a in databaseHeaders:
+            if a[0] == triggerDBName:
+                for y in range(1, len(a)):
+                    if a[y] != "":
+                        listOfColumns.append(a[y].lower())
+
+        for i in listOfColumns:
+            newS = dbName + "." + i + ".csv"
+            file_exists = exists(newS)
+            if file_exists:
+                searchName = dbName + "." + i
+                readTriggers = readCSV(searchName)
+                for x in readTriggers:
+                    databaseUpdateTriggers.append(x)
+
+        print("[INFO] Storing a new database...")
+        print("[INFO] " + str(len(data)) + " new rows added")
+        toConsole("[INFO] Storing a new database...")
+        toConsole("[INFO] " + str(len(data)) + " new rows added")
+        if len(databaseName) == 1:
+            ex.lst6.Append("Clear")
+        if sourceDatabase == dbName:
+            ex.lst.Append(dbName + " (s)")
+            ex.lst2.Append(dbName + " (s)")
+            ex.lst6.Append(dbName + " (s)")
+        else:
+            ex.lst.Append(dbName)
+            ex.lst2.Append(dbName)
+            ex.lst6.Append(dbName)
+
+        # get option data
+        getDatabaseOptions(dbName)
+
+    #if we already have a database, see what changed
+    else:
+        analyzeChangedData(data, indexValue, unchangedIndex)
+    print("[INFO] Finished pulling " + dbName + " database data")
+    toConsole("[INFO] Finished pulling " + dbName + " database data")
+
+def getOperationData(selection):
+    #get operations saved if it exists
+    checkName = selection + "_operations.csv"
+    file_exists = exists(checkName)
+    operationData = []
+    haveDBTriggers = False
+    if file_exists:
+        toConsole("[INFO] Found " + checkName)
+        checkName2 = selection + "_operations"
+        operationData = readCSV(checkName2)
+        sendData = []
+        sendData.append(selection)
+        for a in operationData:
+            if a[0] != "":
+                sendData.append(a)
+                haveDBTriggers = True
+        if haveDBTriggers:
+            toConsole("[INFO] Found operations for " + selection)
+            databaseOperationData.append(sendData)
+        else:
+            toConsole("[INFO] Did not find operations for " + selection)
+            sendData.append(["", "", "", ""])
+            databaseOperationData.append(sendData)
+
+    else:
+        toConsole("[WARNING] " + checkName + " file not found, creating blank file...")
+        with open(checkName, 'w', newline='') as f:
+            thewriter = csv.writer(f)
+            thewriter.writerow(["", "", "", ""])
+        sendData = []
+        sendData.append(selection)
+        sendData.append(["","","",""])
+        databaseOperationData.append(sendData)
+
+
+
+#test pulling database data
+def pullDatabaseTest():
+
+    populateCSV("tempData", 1, 101, 'w')
+    data = readCSV("tempData")
+    addOldData("temperature", data, "hasdiff")
+    pullDataFromDatabase("tempData", True, 0)
+    #time.sleep(30)
+
+    populateCSV("tempData", 101, 151, 'a')
+    data = readCSV("tempData")
+    addOldData("temperature", data, "finddiff")
+    pullDataFromDatabase("tempData", True, 0)
+    #time.sleep(30)
+
+    deleteRowFromCSV("tempData", [3, 50])
+    pullDataFromDatabase("tempData", True, 0)
+
+    updateInfo = [[17, 1, 12], [71, 2, 5], [84, 1, 16]]
+    updateRowFromCSV("tempData", updateInfo)
+    pullDataFromDatabase("tempData", True, 0)
+
+    pullDataFromDatabase("tempData", True, 0)
+
+def blankDatabaseTest():
+    with open("testDataBase.csv", 'w', newline='') as f:
+        thewriter = csv.writer(f)
+        thewriter.writerow(["" , "", ""])
+    pullDataFromDatabase("testDataBase", True, 0)
+    databaseHeaders.append(["testDataBase", "Time", "Temperature", "Voltage"])
+    getOperationData("testDataBase")
+    tmpHeaders = ["Time", "Temperature", "Voltage"]
+    getCutoffData("testDataBase", tmpHeaders)
+
+#delete rows from csv
+def deleteRowFromCSV(csvName, deleteRows):
+    csvName = csvName + ".csv"
+    csvData = []
+    with open(csvName) as csvfile:
+        readCSV = csv.reader(csvfile, delimiter=',')
+        for row in readCSV:
+            csvData.append(row)
+
+    rowCounter = 0
+    with open(csvName, 'w', newline='') as f:
+        thewriter = csv.writer(f)
+        for c in csvData:
+            deleteRow = False
+            for a in deleteRows:
+                if a == rowCounter:
+                    deleteRow = True
+                    break
+            if not deleteRow:
+                thewriter.writerow(c)
+            rowCounter = rowCounter + 1
+
+#update rows in a csv (update info is list of [][row to update, index to update, new value]
+def updateRowFromCSV(csvName, updateInfo):
+    csvName = csvName + ".csv"
+    csvData = []
+    with open(csvName) as csvfile:
+        readCSV = csv.reader(csvfile, delimiter=',')
+        for row in readCSV:
+            csvData.append(row)
+
+    rowCounter = 0
+    with open(csvName, 'w', newline='') as f:
+        thewriter = csv.writer(f)
+        for c in csvData:
+            deletedRow = False
+            for a in updateInfo:
+                if a[0] == rowCounter:
+                    newRow = c
+                    newRow[int(a[1])] = a[2]
+                    thewriter.writerow(newRow)
+                    deletedRow = True
+                    break
+            if not deletedRow:
+                thewriter.writerow(c)
+            rowCounter = rowCounter + 1
+
+def application():
+    app.MainLoop()
+
+def toConsole(newText):
+    global consoleText
+    consoleText = consoleText + "\n" + newText
+    ex.textpanel1.SetValue(consoleText)
+    ex.textpanel1.ShowPosition(ex.textpanel1.GetLastPosition())
+
+def updateTriggers(dbName, triggerType):
+    for i in range(len(databaseName)):
+        if dbName == databaseName[i]:
+            if triggerType == "new":
+                if databaseTriggers[i][1] == 1:
+                    databaseTriggers[i][1] = 0
+                else:
+                    databaseTriggers[i][1] = 1
+            if triggerType == "deleted":
+                if databaseTriggers[i][3] == 1:
+                    databaseTriggers[i][3] = 0
+                else:
+                    databaseTriggers[i][3] = 1
+            if triggerType == "updated":
+                if databaseTriggers[i][2] == 1:
+                    databaseTriggers[i][2] = 0
+                else:
+                    databaseTriggers[i][2] = 1
+
+def saveSourceDatabase(newSourceDB):
+    global sourceDatabase
+    with open("sourceDB.csv", 'w', newline='') as f:
+        thewriter = csv.writer(f)
+        thewriter.writerow([newSourceDB])
+        sourceDatabase = newSourceDB
+
+
+def getSourceDatabase():
+    global sourceDatabase
+    file_exists = exists("sourceDB.csv")
+    if file_exists:
+        csvData = readCSV("sourceDB")
+        sourceDatabase = str(csvData[0][0])
+    else:
+        toConsole("[INFO] Could not find a source database")
+        sourceDatabase = "none"
+
+def saveDatabaseOptions(dbName):
+    str2 = dbName + "_options.csv"
+    with open(str2, 'w', newline='') as f:
+        thewriter = csv.writer(f)
+        for z in databaseOptionData:
+            if z[0] == dbName:
+                thewriter.writerow(z)
+                break
+
+def getDatabaseOptions(dbName):
+    str = dbName + "_options"
+    str2 = dbName + "_options.csv"
+    fileExists = exists(str2)
+    global databaseOptionData
+
+    if fileExists:
+        optionData = readCSV(str)[0]
+        savedOver = False
+        for x in range(len(databaseOptionData)):
+            if databaseOptionData[x][0] == dbName:
+                databaseOptionData[x] = optionData
+                savedOver = True
+        if not savedOver:
+            databaseOptionData.append(optionData)
+    else:
+        toConsole("[WARNING] Could not find options file for " + dbName + ", making default one")
+        with open(str2, 'w', newline='') as f:
+            thewriter = csv.writer(f)
+            newRow = [dbName, 1, 0]
+            thewriter.writerow(newRow)
+
+def main():
+
+    #hasDiffTest()
+    application()
+    #pullDatabaseTest()
+    print(" ========== Finished ==========")
+
+main()
